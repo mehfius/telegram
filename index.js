@@ -1,129 +1,159 @@
-require('dotenv').config()
+var app   = require("./config/server");
+var axios = require('axios')
 
-const express     = require('express')
-const axios       = require('axios')
-const bodyParser  = require('body-parser')
+const conn     = app.config.supa();
 
-const { TOKEN, SERVER_URL } = process.env
-const TELEGRAM_API          = `https://api.telegram.org/bot${TOKEN}`
-const URI                   = `/webhook/${TOKEN}`
-const WEBHOOK_URL           = SERVER_URL + URI
+const TELEGRAM_API          = 'https://api.telegram.org/bot'+process.env['TOKEN']
+const URI                   = '/webhook/'+process.env['TOKEN']
+const WEBHOOK_URL           = process.env['SERVER_URL'] + URI
 
-const app = express()
-
-app.use(bodyParser.json())
+const commands  = ["id","email"];
+const admin     = ["matheusferraz","fernanshow"];
+const users     = ["matheusferraz","fernanshow"];
 
 const init = async () => {
 
-    const res = await axios.get(`${TELEGRAM_API}/setWebhook?url=${WEBHOOK_URL}`)
+  const url = TELEGRAM_API+'/setWebhook?url='+WEBHOOK_URL;
+  const res = await axios.get(url);
+
+}
+
+const send = async function (chat_id,text){
+
+  await axios.post(`${TELEGRAM_API}/sendMessage`, {chat_id: chat_id,text: text,parse_mode:'html'})
+
+}; 
+
+const consulta = async function (label,value){
+
+  const { data, error }  = await conn.from("view_log").select('created_at,id,label,areas,cpf,email,password,telefone,cards,cardsrecebidos,sessions').eq(label,value);
+
+  return data;
+
+};
+
+const dataBR = function (data){
+
+  var options = { day: "numeric", year: "numeric", month: "short", time: "short", hour12: false, hour: "2-digit", minute: "2-digit" };
+
+  return new Date(data).toLocaleDateString('pt-BR',options);
+
+}
+
+const formataSessions = function (data){
+
+  var text ="";
+  var x=0;
+
+  Object.entries(data).forEach(([key, value]) => {
+
+      if(x<20){
+
+        text+="<pre>"+value.ip+" -> "+dataBR(value.created_at)+"</pre>\n";
+
+
+      }
+
+      x++;
+
+  });
+
+  return text;
+
+} 
+
+const formataData = function (data){
+
+  var text ="";
+
+    Object.entries(data[0]).forEach(([key, value]) => {
+
+      let label = key;
+
+      let valor = (value)?value:"Não informado";
+
+      switch (key) {
+
+        case "created_at":  label="Membro desde : ";valor=dataBR(value)+"\n";break;
+        case "label":       label="Nome  : ";break;
+        case "areas":       label="Tipo  : ";break;
+        case "cpf":         label="CPF   : ";break;
+        case "id":          label="ID    : ";break;
+        case "email":       label="Email : ";break;
+        case "telefone":    label="Phone : ";break;
+        case "cards":       label="Cards criados: ";break;
+        case "password":    label="Pass  : ";break;
+        case "cardsrecebidos":       label="Cards recebidos : ";break; 
+        case "sessions":    label="\nÚltimos logins : \n";valor=formataSessions(valor);break;
+
+      }
+
+      text+="<pre><b>"+label+"</b>"+valor+"</pre>\n";
+
+    });
+
+  return text;
 
 }
 
 app.post(URI, async (req, res) => {
 
-    const chatId   = req.body.message.chat.id
-    const text     = req.body.message.text
-    const username = req.body.message.from.username;
-    const users     = ["matheusferraz","fernanshow"];
+  const chat_id   = req.body.message.chat.id
+  const text      = req.body.message.text.toLowerCase();
+  const username  = req.body.message.from.username;
 
-    console.log("["+chatId+"] ["+username+"] ["+text+"]");
+  console.log("["+chat_id+"] ["+username+"] ["+text+"]");
 
-    const main = async function (label,value){
+  var array = text.split(" ");
+  var data  = "";
+  
+  let label = array[0];
+  let value = array[1];
 
-      const { createClient } = require("@supabase/supabase-js");
+  if(users.includes(username)){
+  
+    if(commands.includes(array[0])){
 
-      var connSupa           = function () {return createClient(process.env['url'],process.env['anom_key'])};
+      var bd = await consulta(label,value);
 
-      var connection         = connSupa();
+      if(!bd.length){
 
-      const { data, error }  = await connection.from("users").select('created_at,id,label,cpf,email,telefone').eq(label,value);
-
-      var text = "";
-
-      if(!data.length){
-
-        text="Comando Inválido ou registro não encontrado";
+        data = label+" "+value+" não encontrado";
 
       }else{
 
-        Object.entries(data[0]).forEach(([key, value]) => {
-          
-          let label = key;
+        if(!admin.includes(username)){
 
-          let valor = (value)?value:"Não informado";
+            delete bd[0].password;
 
-          if (key=="created_at"){
 
-            var options = { day: "numeric", year: "numeric", month: "short", time: "short", hour12: false, hour: "2-digit", minute: "2-digit" };
+        }
 
-            valor=new Date(valor).toLocaleDateString('pt-BR',options)+"\n";
-            label="";
-
-          }else if(key=="label"){
-
-            label="Nome  : ";
-
-          }else if(key=="cpf"){
-
-            label="CPF   : ";
-
-          }else if(key=="id"){
-
-            label="ID    : ";
-
-          }else if(key=="email"){
-
-            label="Email : ";
-
-         }else if(key=="telefone"){
-
-            label="Phone : ";
-
-          }
-
-              text+="<pre><b>"+label+"</b>"+valor+"</pre>\n";
-      
-        });
-  
+        data = formataData(bd);
 
       }
 
-      return text;
-
-    };
-
-    const send = async function (text){
-    
-
-      await axios.post(`${TELEGRAM_API}/sendMessage`, {chat_id: chatId,text: text,parse_mode:'html'})
-
-      //await axios.post(`${TELEGRAM_API}/sendMessage`, {chat_id: 1089100690,text: "."})
-      
-
-    }; 
-
-    var array = text.split(" ");
-
-    let label = array[0];
-    let value = array[1];
-
-    let commands = ["id","email"];
-
-    if(commands.includes(array[0])){
-
-      send(await main(label,value));
-
     }else{
 
-      send();
+      data="Comando Inválido";
 
     }
+  
+  }else{
 
-    return res.send("1");
+    data = "Usuário não autorizado"
 
-})
+  }
 
-app.listen(process.env.PORT || 5000, async () => {
-    console.log('🚀 app running on port', process.env.PORT || 5000)
-    await init()
-})
+  send(chat_id,data);
+
+  return res.send("1");
+
+});
+
+app.listen(5000, async function () {
+
+  await init();
+  console.log("rodando");
+  
+});
